@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*
+"""
+Written November 2020 -- Nicholas Jannsen
+Typeset in Python 3
+
+This is a small script that print to bash the most used/common fits header keywords in order to get a better overview of a stack of fits files within one folder. Hence, the only input to this script is simply the path to the file(s). E.g., to make a table of all the ALFOSC fits files within the same folder, then simply use the following as input "*AL".
+
+This function needs to be called from a terminal:
+chmod +x notastrophot
+notheader <path/to/files>
+"""
+
+import numpy as np
+import glob, sys, getopt
+from astropy.io import fits
+from colorama import Fore, Style, Back
+from prettytable import PrettyTable
+
+#--------------------------------------------------------------#
+#                PARSING COMMAND-LINE ARGUMENTS                #
+#--------------------------------------------------------------#
+
+# Initialize input parameters:
+argv = sys.argv      # Arguments parsed to pipeline
+argc = len(argv)     # Number of arguments parsed to pipeline
+# Help usage function:
+def help(): print(Fore.BLUE+Style.BRIGHT+"""Usage : %s <path/to/fits>"""% argv[0][2:]+Style.RESET_ALL)
+# Print usage if no arguments are given:
+if argc==1: help(); sys.exit()
+# Parsing the path:
+files = argv[1:]
+n     = len(files)
+dex   = range(n)
+#--------------------------------------------------------------#
+#                   PRINT FITS HEADERS NICELY                  #
+#--------------------------------------------------------------#
+
+# Get hdulists:
+hduls = np.array([fits.open(str(file)) for file in files])
+# Function to extract headers:
+def headers(name):
+    return [hduls[i][0].header['{}'.format(name)] for i in range(len(files))]
+# Extract headers:
+filename = [headers('FILENAME')[i][:10] for i in range(n)] 
+imgtype  = headers('IMAGETYP')
+target   = headers('TCSTGT')
+objects  = headers('OBJECT')
+exptime  = headers('EXPTIME')     
+# Find correct filter:
+# FIND FILTER FOR OBJECT IMAGES:
+filt_type_alfosc = np.array([hduls[i][0].header['ALFLTNM'] for i in dex])
+filt_type_fasua  = np.array([hduls[i][0].header['FAFLTNM'] for i in dex])
+filt_type_fasub  = np.array([hduls[i][0].header['FBFLTNM'] for i in dex])
+# Add all filters:
+filt = np.char.add(filt_type_alfosc, filt_type_fasua)
+filt = np.char.add(filt, filt_type_fasub)
+# Correct to right filter (OBS the order here is very specific!):
+old_filter_names = ['OpenOpenOpen','Open', ' ', 'IAC040', 'IAC041']
+new_filter_names = ['Clear', '', '_', 'Halp_IAC040', '[NII]_IAC041']
+for i in range(len(filt)):
+    for j in range(len(old_filter_names)):
+        filt[i] = str(filt[i]).replace(old_filter_names[j], new_filter_names[j])
+notfilt = filt
+
+# Make table and print to bash:
+t = PrettyTable(['File', 'Imgtype', 'Target', 'Catalog', 'Filter', 'Exptime'])
+for i in range(n):
+    t.add_row([filename[i], imgtype[i], target[i], objects[i], notfilt[i], exptime[i]])
+print(t)
