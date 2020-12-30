@@ -16,7 +16,7 @@ There is a few requierements for this software which will be stated in the follo
   - Make the software executeable by `chmod +x notastrophot`. Now running the software is simply done with `./notastrophot` or add your path by `PATH=$PATH: ~/path/to/software/` and run the software simply by `notastrophot`.
   - Place your files in a suitable folder on your pc (`~/path/to/data/`)
   - Calibration data (bias and flats) are not a nescessity but highly recommented!  Notice no dark frames are needed since the ALFOSC CCD is cooled down to ~ -120 degC.
-    1. If calibration data _IS_ available: 
+    1. If calibration data **IS** available: 
       - Running by default, calibration data needs to be placed in a layer below in a folder called `calibs`: `~/path/to/data/../calibs/`. The reason for this locked location is simply to have a minimum number of fits file on the system. If the calibration data is placed elsewhere, the corresponding path has to be changed, which revised in the "Parameter tweaking" section. If calibrations' are included, for optimal exraction use:
       - Bias (no.>3) frames (optional) 
       - Flat (no.>3) frames in each filter from the same night (optional)
