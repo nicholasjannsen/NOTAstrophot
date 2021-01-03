@@ -1,4 +1,5 @@
-# NOTAstrophot `v0.0.3`
+# NOTAstrophot
+>>>>>>> b0be4d41d0b57818a0e123e0f17dbd9e5de13241
 This python class is specifically made for imaging with the instrument ALFOSC at the Nordic Optical Telescope (NOT) located at Roque De Los Munchacos on La Palma, Canary islands, Spain. Please carefully read the this instructions page in order to successfully run this piece of software. Any problems related to running the code should be added as a github debug or directed to Nicholas E. Jannsen (email: nej@not.iac.es).
 
 The Software is seperated into 4 modules performing 
@@ -76,4 +77,7 @@ Debugging and Development
 - If more than approx 15 bias or flat frames are feed to the program, the numpy array structure changes and the program crashes. It might be an internal problem with fits files and numpy, but the problem haven't been solved.
 - A future update could be to make better corrections for the sky background in the narrow band filters. This could e.g. be done by using the info of gaussian noise from the cosmic detection algorithm.
 - The image registration module first tries to use the Python library `astroalign` which solves images using trigometric stellar coordinate solutions, however, it seems to crash from time to time upon being exposed to ALFOSC images. If this happens the software will continue with a simple alignment using stellar coordinates; by finding stars and identifying identical object within a relatively short pixel distance apart. If image registration with astroalign fails, this limits the act of combining old frames with different coordinates, hence, a future update could be to try other image registration python repositories (e.g., `alipy`, `imagereg`, etc.) before falling back to simple alignment. 
+<<<<<<< HEAD
 
+=======
+>>>>>>> b0be4d41d0b57818a0e123e0f17dbd9e5de13241
