@@ -643,24 +643,24 @@ class NOTAstrophot(object):
     #########################################################################################
     #                                     IMAGE ALIGNMENT                                   #
     ######################################################################################### 
+
     def image_alignment(self): 
         """
         This function takes N number of frames and align them, thus make the post processing easier.
         This function can both shift frames using stellar centroids.
-        ----------------------------
-                   OUTPUT          :
-        ----------------------------
-        align_'date'_'filter'(fits): Calibrated light frame
         """
         # LOAD DATA:
         files = np.sort(glob.glob('{}clean*'.format(self.path)))
         hduls = np.array([fits.open(str(fil)) for fil in files])
         LF_i  = np.array([fits.getdata(str(files[i])) for i in range(self.n_target)]) 
 
+        # LOOP OVER ALL IMAGES:
         for i in range(len(files)):
+
+            # Make string to save files:
             string_i = str(files[i]).replace('clean', 'shift')
             
-            # FIRST TRY ASTROALIGN:
+            # FIRST TRY ASTROALIGN: (https://github.com/toros-astro/astroalign)
             try: LF_shift, _ = astroalign.register(LF_i[i], LF_ref)
             except Exception: LF_shift = False
             else: pass
@@ -997,9 +997,10 @@ if step2==[] or redo==True:
 #-----------------
 step3 = glob.glob('{}shift*'.format(path))
 if step3!=[] and redo==False:
-    print(Fore.GREEN+'3/4: IMAGE ALIGNMENT: Aligned images already exist - Skipping step')
+    print(Fore.GREEN+'3/4: IMAGE REGISTRATION: Aligned images already exist - Skipping step')
 if step3==[] or redo==True:
-    print(Fore.GREEN+Style.BRIGHT+'3/4: IMAGE ALIGNMENT: This might take a while..'+Style.RESET_ALL)
+    print(Fore.GREEN+Style.BRIGHT+'3/4: IMAGE REGISTRATION: Rotate, scale, and align images'\
+          +Style.RESET_ALL)
     n.image_alignment()
 #-----------------
 #  COLOR IMAGE  :

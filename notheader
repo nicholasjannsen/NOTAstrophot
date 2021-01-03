@@ -56,8 +56,8 @@ filt_type_fasub  = np.array([hduls[i][0].header['FBFLTNM'] for i in dex])
 filt = np.char.add(filt_type_alfosc, filt_type_fasua)
 filt = np.char.add(filt, filt_type_fasub)
 # Correct to right filter (OBS the order here is very specific!):
-old_filter_names = ['OpenOpenOpen','Open', ' ', 'IAC040', 'IAC041']
-new_filter_names = ['Clear', '', '_', 'Halp_IAC040', '[NII]_IAC041']
+old_filter_names = ['OpenOpenOpen','Open', ' ', 'IAC040', 'Halp', 'Hbet', 'IAC041', '__', "'"]
+new_filter_names = ['Clear', '', '_', '[Halp]_IAC040', '[Halp]', '[Hbet]', '[NII]_IAC041', '_', ""]
 for i in range(len(filt)):
     for j in range(len(old_filter_names)):
         filt[i] = str(filt[i]).replace(old_filter_names[j], new_filter_names[j])

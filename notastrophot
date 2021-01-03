@@ -4,7 +4,7 @@
 Written November 2020 -- Nicholas Jannsen
 Typeset in Python 3
 
-This function needs to be called from a terminal:
+This function needs to be called from a terminal (see README file):
 chmod +x notastrophot
 notastrophot [-p] [-r] [-s] [-c <clip>] <path/to/data/>
 """
@@ -24,8 +24,11 @@ import scipy.ndimage as ndimage
 import scipy.ndimage as snd
 # skimage:
 from skimage import feature as skfeature
+from skimage.util import img_as_float32
 # Print colors:
 from colorama import Fore, Style, Back
+# Astroalign:
+import astroalign
 # Others:
 import math, sys, time, glob, pylab, heapq, getopt, os
 #--------------------
@@ -34,9 +37,9 @@ import math, sys, time, glob, pylab, heapq, getopt, os
 # Global settings for out-print to terminal (allow more digits and nice coloum ordering):
 np.set_printoptions(suppress=True, formatter={'float_kind':'{:7.5f}'.format}, linewidth=100)
 
-############################################################################################################
-#                                               DEFINE CLASS                                               #
-############################################################################################################
+####################################################################################################
+#                                         DEFINE CLASS                                             #
+####################################################################################################
 
 class NOTAstrophot(object):
 
@@ -51,6 +54,7 @@ class NOTAstrophot(object):
         self.maxiter   = 3                   # Max iterations for L.A. cosmic (default 3)
         self.starsigma = 2                   # Star detection threshold in standard deviations
         self.pixshift  = 20                  # Pixel distance for image alignment (default 30)
+        self.pathc     = None                # Customize path to calibs or keep default 
         #-----------------------------------
         # GLOBAL VARIABLES - DO NOT CHANGE!:
         #-----------------------------------
@@ -60,7 +64,7 @@ class NOTAstrophot(object):
         self.sigclip = float(clip)
         self.path = path
         # Sepearte plot options:
-        if plot==True:  self.plot = [True, True, True, True]
+        if plot==True:  self.plot = [True,  True,  True,  True ]
         if plot==False: self.plot = [False, False, False, False]
         # Check for correct parsing of plot:
         if len(self.plot)!=4:
@@ -83,27 +87,32 @@ class NOTAstrophot(object):
             return [self.LF_hduls[i][0].header['{}'.format(name)] for i in range(len(self.LF_files))]
         self.filename = [LF_headers('FILENAME')[i][:10] for i in range(self.LF_n)] 
         self.notdate  = [LF_headers('FILENAME')[i][:6]  for i in range(self.LF_n)]
-        self.target   = LF_headers('TCSTGT')[0]
         self.exptime  = LF_headers('EXPTIME')     
         self.imgtype  = LF_headers('IMAGETYP')
+        self.tcstgt   = LF_headers('TCSTGT')
         self.airmass  = LF_headers('AIRMASS')
-        self.wx       = LF_headers('RA')
-        self.wy       = LF_headers('DEC')
         # Check and correct old header info:        
         for i in range(self.LF_n):
             if self.imgtype[i]=='': self.imgtype[i] = 'OBJECT'
             if self.imgtype[i]=='OBJECT' and self.tcstgt[i]=='Undefined': self.imgtype[i] = 'FLAT'
         # Check if calibs are place in the same folder:
         if self.imgtype != list(['OBJECT']*self.LF_n):
-            print(Fore.RED+\
+            print(Fore.RED+Style.BRIGHT+\
                   'ERROR! Calib frames most be placed in the following folder "/path/to/data/../calibs/"')
             sys.exit()
         # Check if object are observed at high airmass':
         if self.airmass > [2.5]*self.LF_n:
-            print(Fore.YELLOW+\
+            print(Fore.YELLOW+Style.BRIGHT+\
                   'WARNING! One or several frames are observed at Airmass > 2.5 (Altitude < 22 deg)'+\
                   Style.RESET_ALL)
-
+        # Save target name:
+        self.dex_target = np.where(np.array(self.imgtype)=='OBJECT')[0]
+        self.n_target   = len(self.dex_target)
+        self.target     = LF_headers('OBJECT')[self.dex_target[0]]
+        # Coordinates of images:
+        self.wx = [LF_headers('RA')[self.dex_target[i]]  for i in range(self.n_target)]
+        self.wy = [LF_headers('DEC')[self.dex_target[i]] for i in range(self.n_target)]
+            
         # FIND FILTER FOR OBJECT IMAGES:
         LF_filt_type_alfosc = np.array([self.LF_hduls[i][0].header['ALFLTNM'] for i in self.LF_dex])
         LF_filt_type_fasua  = np.array([self.LF_hduls[i][0].header['FAFLTNM'] for i in self.LF_dex])
@@ -112,29 +121,28 @@ class NOTAstrophot(object):
         LF_filt = np.char.add(LF_filt_type_alfosc, LF_filt_type_fasua)
         LF_filt = np.char.add(LF_filt, LF_filt_type_fasub)
         # Correct to right filter (OBS the order here is very specific!):
-        self.old_filter_names = ['OpenOpenOpen','Open', ' ', 'IAC040', 'IAC041']
-        self.new_filter_names = ['Clear', '', '_', 'Halp_IAC040', '[NII]_IAC041']
+        self.old_filter_names = ['OpenOpenOpen','Open', ' ', 'IAC040', 'IAC041', '__', "'", '[', ']']
+        self.new_filter_names = ['Clear', '', '_', 'Halp_IAC040', 'NII_IAC041', '_', "", '', '']
         for i in range(len(LF_filt)):
             for j in range(len(self.old_filter_names)):
                 LF_filt[i] = str(LF_filt[i]).replace(self.old_filter_names[j], self.new_filter_names[j])
         self.LF_filt = LF_filt
         # Special care is needed for narrowband filters:
         self.narrowbands = {'Halp_658_18', 'Halp_656_3', 'Halp_IAC040', \
-                            'Hbet_485_13', '[OIII]_501_3', '[SII]_672_5', \
-                            '[NII]_575_3', '[NII]_IAC041'}
+                            'Hbet_485_13', 'OIII_501_3', 'SII_672_5', \
+                            'NII_575_3', 'NII_IAC041'}
         
         # FIND DATES OF OBSERVATIONS AND REDUCE IMAGES FOR ONE DATE AT A TIME:
         self.dates = np.unique(self.notdate)
-
-        #---------------
+        
+        # DEBUGGING:
         # print(self.imgtype)
         # print(self.tcstgt)
         # sys.exit()
-        #---------------
         
-    ####################################################################################################
-    #                                      IMAGE REDUCTION                                             #
-    ####################################################################################################
+    #============================================================================================#
+    #                                      IMAGE REDUCTION                                       #
+    #============================================================================================#
 
     def image_reduction(self):
         """
@@ -160,7 +168,7 @@ class NOTAstrophot(object):
 
         # LOOP OVER EACH DATE:
         for i in range(len(self.dates)):
-
+            
             #--------------------------------
             # LOAD ALL INFO FOR LIGHT FRAMES:
             #--------------------------------
@@ -191,10 +199,10 @@ class NOTAstrophot(object):
             #--------------------------------
 
             # LOAD IMAGE FILES:
-            calib_files = np.sort(glob.glob('{}../calibs/{}/{}*.fits'.\
-                                            format(self.path, self.dates[i], self.dates[i])))
+            if self.pathc is None: pathc = self.path+'../calibs/'+self.dates[i]+'/'
+            calib_files = np.sort(glob.glob('{}AL*.fits'.format(pathc)))
             calib_hduls = np.array([fits.open(str(files)) for files in calib_files])
-
+            
             # EXTRACT CALIBS HEADER INFO:
             def headers(name):
                 return [calib_hduls[i][0].header['{}'.format(name)] for i in range(len(calib_files))]
@@ -202,26 +210,27 @@ class NOTAstrophot(object):
             notdate  = [headers('FILENAME')[i][:6]  for i in range(len(calib_files))]
             imgtype  = headers('IMAGETYP')
             datetime = [headers('DATE-OBS')[i]  for i in range(len(calib_files))]
-
+            
             # BIAS FRAMES:
             BF_dex = np.where(np.array(imgtype)=='BIAS')[0]
-            # Check if calibration images exist:
-            if len(BF_dex)<=1:
-                print(Fore.RED+'ERROR! Missing bias images for data {}'.format(self.dates[i]));sys.exit()
-            # Load calib-images into arrays:
-            BF_i = np.array([fits.getdata(str(calib_files[i])) for i in BF_dex])
-            # Cut out the borders of the square filters:
-            BF_i = BF_i[:, self.borders[0]:self.borders[1], self.borders[2]:self.borders[3]]
+            if not BF_dex.any():
+                print(Fore.RED+Style.BRIGHT+\
+                      'ERROR: Missing bias images for date {}!'.format(self.dates[i])); sys.exit()
+            else:    
+                # Load calib-images into arrays:
+                BF_i = np.array([fits.getdata(str(calib_files[i])) for i in BF_dex])
+                # Cut out the borders of the square filters:
+                BF_i = BF_i[:, self.borders[0]:self.borders[1], self.borders[2]:self.borders[3]]
 
-            # IF FLATS ARE NOT SKIPPED:
-            if self.skip==False:
-                FF_sky_dex  = np.where(np.array(imgtype)=='FLAT,SKY')[0]
-                FF_dome_dex = np.where(np.array(imgtype)=='FLAT')[0]
-                FF_dex      = np.append(FF_dome_dex, FF_sky_dex)
-                # Check if calibration images exist:
-                if len(FF_dex)<=1:
-                    print(Fore.RED+'ERROR! Missing flat images for data {}'.format(self.dates[i]))
-                    sys.exit()
+            # FLATS FRAMES:
+            FF_sky_dex  = np.where(np.array(imgtype)=='FLAT,SKY')[0]
+            FF_dome_dex = np.where(np.array(imgtype)=='FLAT')[0]
+            FF_dex      = np.append(FF_dome_dex, FF_sky_dex)
+            # Check if images exist:
+            if not FF_dex.any():
+                print(Fore.RED+Style.BRIGHT+\
+                      'ERROR: Missing flat images for date {}!'.format(self.dates[i]));sys.exit()
+            else:
                 # FIND FLAT FILTERS:
                 FF_filt_type_alfosc = np.array([calib_hduls[i][0].header['ALFLTNM'] for i in FF_dex])
                 FF_filt_type_fasua  = np.array([calib_hduls[i][0].header['FAFLTNM'] for i in FF_dex])
@@ -239,25 +248,28 @@ class NOTAstrophot(object):
                                                 for i in range(len(FF_dif))])
                         FF_filt_dex = np.array([np.where(FF_dif==self.LF_filt[i])[0] \
                                                 for i in range(len(self.LF_dex))])
-                # print(FF_dif)
-                # print(FF_filt_dif)
-                # print(FF_filt_dex)
-                # sys.exit()
+               
                 # # Load calib-images into arrays: 
                 FF_i = np.array([fits.getdata(str(calib_files[i])) for i in FF_dex])
                 # Cut out the borders of the square filters:
                 FF_i = FF_i[:, self.borders[0]:self.borders[1], self.borders[2]:self.borders[3]]
 
-            #---------------------------------
-            # MAKE MASTER CALIBRATION FRAMES :
-            #---------------------------------
+                # DEBUGGING:
+                # print(FF_dif)
+                # print(FF_filt_dif)
+                # print(FF_filt_dex)
+                # sys.exit()
+                
+            #--------------------------------
+            # MAKE MASTER CALIBRATION FRAMES:
+            #--------------------------------
 
             # MAKE MASTER BIAS:
             BF = np.median(BF_i, axis=0)
             # Find bias level:
             BF_med = np.median(BF)
             # Save master bias:
-            fits.writeto('{}../calibs/MasterBias_{}.fits'.format(self.path, self.notdate[i]), \
+            fits.writeto('{}MasterBias_{}.fits'.format(pathc, self.notdate[i]), \
                          BF, header=calib_hduls[BF_dex[0]][0].header, overwrite=True)
 
             # MAKE MASTER FLATS:
@@ -275,7 +287,7 @@ class NOTAstrophot(object):
                     FF_k[k] = FF
                 # Save master flats:    
                 for j in range(len(FF_k)):
-                    fits.writeto('{}../calibs/MasterFlat_{}_{}.fits'.format(self.path, self.dates[i], \
+                    fits.writeto('{}/MasterFlat_{}_{}.fits'.format(pathc, self.dates[i], \
                                                                       FF_dif[j]), FF_k[j], \
                                  header=calib_hduls[FF_filt_dif[j][0]][0].header, overwrite=True)
 
@@ -328,10 +340,11 @@ class NOTAstrophot(object):
 
             # EXIT LOOP IF ONLY ONE DATE IS PRESENT:
             if len(self.dates)==1: break
+            
+    #============================================================================================#
+    #                                        COSMIC REMOVAL                                      #
+    #============================================================================================#
 
-    #########################################################################################
-    #                                     COSMIC REMOVAL                                    #
-    ######################################################################################### 
     def cosmic_removal(self):
         """
         This functions is a python module to detect and clean cosmic ray hits on images (numpy
@@ -344,16 +357,7 @@ class NOTAstrophot(object):
         the core is really a 1-to-1 implementation of L.A.Cosmic, and uses the same parameters. Only
         the conventions on how filters are applied at the image edges might be different. No surprise,
         this python module is much faster then the IRAF implementation, as it does not read/write
-        every step to disk.
-        ----------------------------
-                    INPUT          :
-        ----------------------------
-        path               (string): Directory path to data
-        plot                  (int): Use plot==1 for illustrative plots of the routines functionality
-        ----------------------------
-                   OUTPUT          :
-        ----------------------------
-        clean_*.fits         (fits): Calibrated light frame
+        every step to disk. Author: 
         """
         # COSMICS LIMITS:
         self.sigcliplow = self.sigclip * self.sigfrac
@@ -423,7 +427,8 @@ class NOTAstrophot(object):
         #-------------------
         # BUILDING THE MASK:
         #-------------------
-        # We dilate the satpixels alone, to ensure connectivity in glitchy regions and to add a safety margin around them. It turns out it's better to think large and do 2 iterations...
+        # We dilate the satpixels alone, to ensure connectivity in glitchy regions and to add
+        # a safety margin around them. It turns out it's better to think large and do 2 iterations...
         dilstruct    = np.array([[0,1,0], [1,1,1], [0,1,0]])
         dilsatpixels = ndimage.morphology.binary_dilation(largestruct, structure=dilstruct, iterations=2, \
                                                           mask=None, output=None, border_value=0, \
@@ -528,8 +533,8 @@ class NOTAstrophot(object):
         if self.satstars is not None:
             finalsel = np.logical_and(np.logical_not(self.satstars), finalsel)
         nbfinal = np.sum(finalsel)
-        # Now the replacement of the cosmics...
-        # we outsource this to the function clean, as for some purposes the cleaning might not even be needed.
+        # Now the replacement of the cosmics. We outsource this to the function clean, as for
+        # some purposes the cleaning might not even be needed.
         # We find how many cosmics are not yet known :
         newmask = np.logical_and(np.logical_not(self.mask), finalsel)
         nbnew = np.sum(newmask)	
@@ -636,59 +641,64 @@ class NOTAstrophot(object):
         COF    = np.asarray(snd.center_of_mass(mask*1, labels, range(1,nlabels+1)))
         return radius, COF
 
-    #########################################################################################
-    #                                     IMAGE ALIGNMENT                                   #
-    ######################################################################################### 
+    #============================================================================================#
+    #                                       IMAGE ALIGNMENT                                      #
+    #============================================================================================#
+
     def image_alignment(self): 
         """
         This function takes N number of frames and align them, thus make the post processing easier.
         This function can both shift frames using stellar centroids.
-        ----------------------------
-                    INPUT          :
-        ----------------------------
-        path               (string): Directory path to data
-        plot                  (int): If plot=1: plots all relevant frames
-        save                  (int): If save=1: saves all corrected light frames in seperate files
-        ----------------------------
-                   OUTPUT          :
-        ----------------------------
-        align_'date'_'filter'(fits): Calibrated light frame
         """
         # LOAD DATA:
-        self.imgfiles = np.sort(glob.glob('{}clean*'.format(self.path)))
+        img_files = np.sort(glob.glob('{}clean*'.format(self.path)))
                       
-        # LOOP OVER ALL IMAGES:
+        # Loop over all files:
         for i in range(self.LF_n):
+
             # Make string to save files:
-            string_i = str(self.imgfiles[i]).replace('clean', 'shift')
+            string_i = str(img_files[i]).replace('clean', 'imreg')
 
-            # MATCH COORDINATES AND SHIFT IMAGES:
-            with fits.open(str(self.imgfiles[i])) as hdu_i:
-                LF_i = hdu_i[0].data
-                # Use star_finder to find stellar coordinates:
-                self.star_finder(LF_i, sigma=self.starsigma)
-                # First image is the reference:
-                if i is 0:
-                    LF_shift = LF_i
-                    LF_0     = LF_i
-                    COF_0    = self.COF
-                    self.indices1 = 0
-                    self.indices2 = 0
-                    shift    = 0
-                # And then match and shift consecutive frames:
-                if i is not 0:
-                    self.match_coordinates(COF_0, self.COF, self.pixshift)
-                    shift    = np.mean(COF_0[self.indices1] - self.COF[self.indices2], axis=0) 
-                    LF_shift = snd.interpolation.shift(LF_i, shift)
+            # Open and close each file in order not to overload buffer:
+            with fits.open(str(img_files[i])) as hduls:
 
-                # SAVE IMAGE:
-                fits.writeto(string_i, LF_shift, header=self.LF_hduls[self.LF_dex[i]][0].header, \
-                             overwrite=True)
-                # PLOT IMAGES:
-                if self.plot[2] is 1:    
-                    self.FITS_shift(LF_i, COF_0, self.COF, self.radius, self.nstars, \
-                                    self.indices1, self.indices2, shift, self.notdate[i], \
-                                    self.LF_filt[i], i)
+                # Load image (float32 specific for skimage.wrap inside astroalign)
+                img_i = img_as_float32(hduls[0].data)
+
+                # Use the 0th image as reference:
+                if i is 0: img_ref = img_i
+                
+                # FIRST TRY ASTROALIGN: (https://github.com/toros-astro/astroalign)
+                try: img_reg, _ = astroalign.register(img_i, img_ref)
+                except Exception: img_reg = img_i
+                else: pass
+
+                # # MATCH COORDINATES AND SHIFT IMAGES:
+                # if img_reg is False:
+                #     # Use star_finder to find stellar coordinates:
+                #     self.star_finder(img_i, sigma=self.starsigma)
+                #     # First image is the reference:
+                #     if i is 0:
+                #         LF_shift = LF_i
+                #         LF_0     = LF_i
+                #         COF_0    = self.COF
+                #         self.indices1 = 0
+                #         self.indices2 = 0
+                #         shift    = 0
+                #     # And then match and shift consecutive frames:
+                #     if i is not 0:
+                #         self.match_coordinates(COF_0, self.COF, self.pixshift)
+                #         shift    = np.mean(COF_0[self.indices1] - self.COF[self.indices2], axis=0) 
+                #         LF_shift = snd.interpolation.shift(LF_i, shift)
+                #     # PLOT IMAGES:
+                #     if self.plot[2] is True:    
+                #         self.FITS_shift(LF_i, COF_0, self.COF, self.radius, self.nstars, \
+                #                         self.indices1, self.indices2, shift, self.notdate[i], \
+                #                         self.LF_filt[i], i)
+                
+                #SAVE IMAGE:
+                fits.writeto(string_i, img_reg, header=hduls[0].header, overwrite=True)
+                
             # Print to bash:
             self.compilation(i, self.LF_n, 'Reduced')
         print; print('')
@@ -748,17 +758,18 @@ class NOTAstrophot(object):
         # Final list of matching array2 stars:
         self.indices2 = [index_min[i] for i in self.indices1]
 
-    #########################################################################################
-    #                                      RGB COMBINE                                      #
-    ######################################################################################### 
+    #============================================================================================#
+    #                                         RGB COMBINE                                        #
+    #============================================================================================#
+
     def rgb_combine(self): 
         """
-        This function takes RGB images and combie them to one sigle color image. All images are aligned 
-        before combined. The best result is obtained by performing image reduction (with flats, and darks)
-        before using this function.
+        This function takes RGB images and combie them to one sigle color image. All images are
+        aligned before combined. The best result is obtained by performing image reduction (with
+        flats, and darks) before using this function.
         """
         # LOAD FILES:
-        LF_files = np.sort(glob.glob('{}shift*'.format(self.path)))
+        LF_files = np.sort(glob.glob('{}imreg*'.format(self.path)))
         LF_hduls = np.array([fits.open(str(files)) for files in LF_files])
         LF_i     = np.array([LF_hduls[i][0].data for i in range(self.LF_n)])
         
@@ -834,6 +845,7 @@ class NOTAstrophot(object):
     def FITS_clean(self, img1, img2, date, filt, mask, sigma=2):
         filt = str(filt).replace('_', ' ')
         radius, COF = self.find_structures(self.mask)
+        print(COF)
         fig, (ax1, ax2) = plt.subplots(1, 2)    
         ax1.scatter(COF[:,1], COF[:,0], s=10*radius, facecolors='none', edgecolors='r')
         ax1.imshow(self.linear(img1, sigma), cmap='Greys', origin='lower')
@@ -879,9 +891,9 @@ class NOTAstrophot(object):
         imageData[indices] = 1.0
         return imageData
 
-#########################################################################################
-#                                  TOP-LAYER PIPELINE                                   #
-######################################################################################### 
+##############################################################################################
+#                                     TOP-LAYER PIPELINE                                     #
+##############################################################################################
 
 #--------------------------------------------------------------#
 #                PARSING COMMAND-LINE ARGUMENTS                #
@@ -973,7 +985,7 @@ print(Back.BLUE+Style.BRIGHT+\
 # IMPORT CLASS AND FUNCTIONS:
 n = NOTAstrophot(plot, redo, skip, clip, path)
 # Show diagram of files that is going to be reduced:
-os.system('notheader %s*'% path)
+os.system('notheader %sAL*'% path)
 #-----------------
 # IMAGE REDUCTION:
 #-----------------
@@ -982,9 +994,9 @@ if step1!=[] and redo==False:
     print(Fore.GREEN+'1/4: IMAGE REDUCTION: Reduced images already exist - Skipping step')
 if step1==[] or redo==True:
     print(Fore.GREEN+Style.BRIGHT+'1/4: IMAGE REDUCTION: Loading images..'+Style.RESET_ALL)
-    if skip==True:
-        print(Fore.YELLOW+'     Skipping flat fielding (not recommended!)'+Style.RESET_ALL)
     n.image_reduction()    
+    if skip==True:
+        print(Fore.YELLOW+'     Skipping image reduction (not recommended!)'+Style.RESET_ALL)
 #-----------------
 # COSMICS REMOVAL:
 #-----------------
@@ -997,11 +1009,12 @@ if step2==[] or redo==True:
 #-----------------
 # IMAGE ALIGNMENT:
 #-----------------
-step3 = glob.glob('{}shift*'.format(path))
+step3 = glob.glob('{}imreg*'.format(path))
 if step3!=[] and redo==False:
-    print(Fore.GREEN+'3/4: IMAGE ALIGNMENT: Aligned images already exist - Skipping step')
+    print(Fore.GREEN+'3/4: IMAGE REGISTRATION: Aligned images already exist - Skipping step')
 if step3==[] or redo==True:
-    print(Fore.GREEN+Style.BRIGHT+'3/4: IMAGE ALIGNMENT: This might take a while..'+Style.RESET_ALL)
+    print(Fore.GREEN+Style.BRIGHT+'3/4: IMAGE REGISTRATION: Aligning images..'\
+          +Style.RESET_ALL)
     n.image_alignment()
 #-----------------
 #  COLOR IMAGE  :
