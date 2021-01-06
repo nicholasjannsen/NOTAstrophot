@@ -1,5 +1,4 @@
 # NOTAstrophot
->>>>>>> b0be4d41d0b57818a0e123e0f17dbd9e5de13241
 This python class is specifically made for imaging with the instrument ALFOSC at the Nordic Optical Telescope (NOT) located at Roque De Los Munchacos on La Palma, Canary islands, Spain. Please carefully read the this instructions page in order to successfully run this piece of software. Any problems related to running the code should be added as a github debug or directed to Nicholas E. Jannsen (email: nej@not.iac.es).
 
 The Software is seperated into 4 modules performing 
