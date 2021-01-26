@@ -64,8 +64,8 @@ class NOTAstrophot(object):
         self.sigclip = float(clip)
         self.path = path
         # Sepearte plot options:
-        if plot==True:  self.plot = [True,  True,  True,  True ]
-        if plot==False: self.plot = [False, False, False, False]
+        if plot == True:  self.plot = [True,  True,  True,  True ]
+        if plot == False: self.plot = [False, False, False, False]
         # Check for correct parsing of plot:
         if len(self.plot)!=4:
             print(Fore.RED+Style.BRIGHT+'ERROR! Plot option takes only 1 or 4 parameters as input')
